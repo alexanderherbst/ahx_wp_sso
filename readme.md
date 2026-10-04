@@ -21,6 +21,8 @@ AHX WP SSO betreibt einen eigenständigen WordPress-SSO-Host für WordPress-Clie
 
 Registrierte Clients können in der Liste widerrufen werden. Nach dem Widerruf sind keine neuen Anmeldungen dieses Clients mehr möglich.
 
+In der Client-Liste kann die Anmeldedarstellung pro Client angepasst werden: Anzeigename, HTTPS-Logo-URL und Akzentfarbe. Bei einem Anmeldeversuch wird die Host-Anmeldeseite passend zum Client gestaltet. Ist am Host bereits ein Benutzer angemeldet, erscheint stattdessen eine gestaltete Bestätigung mit „Weiter“ und einer Option, das Konto zu wechseln. Das Passwort wird weiterhin ausschließlich auf der SSO-Host-Seite eingegeben.
+
 ### SSO-Dashboard
 
 Im Host-Betrieb erscheint unter **Einstellungen → SSO Dashboard** eine Übersicht mit Betriebsparametern, Endpunkt-URLs, registrierten Clients und Client-Sitzungen. Pro Sitzung werden Benutzer, Client-Site, Status, Beginn, letzter bestätigter Aufruf, Ablaufzeit, die IP-Adresse und der Browser/User-Agent der zugehörigen Host-Sitzung sowie eine gekürzte Sitzungskennung angezeigt. Client-Secrets und Sitzungstoken werden nicht dargestellt.

@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 final class AHX_WP_SSO {
     const ACTION = 'ahx_wp_sso';
     const REST_NAMESPACE = 'ahx-wp-sso/v1';
+    const DB_SCHEMA_VERSION = '2';
     const FLOW_LIFETIME = 300;
     const SESSION_CACHE_LIFETIME = 15;
     const HOST_CHECK_CACHE_LIFETIME = 5;
@@ -23,7 +24,7 @@ final class AHX_WP_SSO {
 
     public static function activate($network_wide) {
         self::install_tables();
-        update_site_option('ahx_wp_sso_schema_version', AHX_WP_SSO_VERSION);
+        update_site_option('ahx_wp_sso_db_schema_version', self::DB_SCHEMA_VERSION);
     }
 
     private static function install_tables() {
@@ -101,6 +102,7 @@ final class AHX_WP_SSO {
         add_action('admin_menu', array($this, 'add_dashboard_page'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_post_ahx_wp_sso_add_client', array($this, 'add_client'));
+        add_action('admin_post_ahx_wp_sso_save_client_branding', array($this, 'save_client_branding'));
         add_action('admin_post_ahx_wp_sso_remove_client', array($this, 'remove_client'));
         add_action('admin_notices', array($this, 'show_setup_notice'));
         add_action('rest_api_init', array($this, 'register_rest_routes'));
@@ -110,12 +112,17 @@ final class AHX_WP_SSO {
         add_action('set_auth_cookie', array($this, 'record_break_glass_cookie'), 10, 6);
         add_filter('authenticate', array($this, 'block_local_client_login'), 99, 3);
         add_filter('login_message', array($this, 'break_glass_login_message'));
+        add_filter('login_message', array($this, 'client_login_message'), 20);
+        add_filter('login_title', array($this, 'client_login_title'), 10, 3);
+        add_filter('login_headerurl', array($this, 'client_login_header_url'));
+        add_filter('login_headertext', array($this, 'client_login_header_text'));
+        add_action('login_head', array($this, 'client_login_styles'));
     }
 
     public function maybe_upgrade() {
-        if (AHX_WP_SSO_VERSION !== get_site_option('ahx_wp_sso_schema_version')) {
+        if (self::DB_SCHEMA_VERSION !== get_site_option('ahx_wp_sso_db_schema_version')) {
             self::install_tables();
-            update_site_option('ahx_wp_sso_schema_version', AHX_WP_SSO_VERSION);
+            update_site_option('ahx_wp_sso_db_schema_version', self::DB_SCHEMA_VERSION);
         }
     }
 
@@ -133,13 +140,14 @@ final class AHX_WP_SSO {
         if ('host' !== $this->config()['mode']) {
             return;
         }
-        add_submenu_page(
-            'options-general.php',
+        add_menu_page(
             __('AHX WP SSO Dashboard', 'ahx-wp-sso'),
-            __('SSO Dashboard', 'ahx-wp-sso'),
+            __('Dashboard', 'ahx-wp-sso'),
             'manage_options',
             'ahx-wp-sso-dashboard',
-            array($this, 'render_dashboard')
+            array($this, 'render_dashboard'),
+            'dashicons-admin-site-alt3',
+            3
         );
     }
 
@@ -527,6 +535,11 @@ final class AHX_WP_SSO {
             error_log('AHX WP SSO could not remove a client: ' . $wpdb->last_error);
             wp_die(esc_html__('Client konnte nicht entfernt werden. Details stehen im Server-Log.', 'ahx-wp-sso'), '', array('response' => 500));
         }
+        $branding = get_option('ahx_wp_sso_client_branding', array());
+        if (is_array($branding) && isset($branding[$client_id])) {
+            unset($branding[$client_id]);
+            update_option('ahx_wp_sso_client_branding', $branding, false);
+        }
         $codes_deleted = $wpdb->delete($this->table('codes'), array('client_id' => $client_id), array('%s'));
         if (false === $codes_deleted) {
             error_log('AHX WP SSO could not remove authorization codes for revoked client: ' . $wpdb->last_error);
@@ -540,6 +553,60 @@ final class AHX_WP_SSO {
         }
         wp_safe_redirect(admin_url('options-general.php?page=ahx-wp-sso'));
         exit;
+    }
+
+    public function save_client_branding() {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('Unzureichende Berechtigung.', 'ahx-wp-sso'), '', array('response' => 403));
+        }
+        $client_id = isset($_POST['client_id']) ? sanitize_text_field(wp_unslash($_POST['client_id'])) : '';
+        check_admin_referer('ahx_wp_sso_save_client_branding_' . $client_id);
+        if ('host' !== $this->config()['mode'] || !preg_match('/^[a-f0-9]{64}$/', $client_id) || !$this->get_client($client_id)) {
+            wp_die(esc_html__('Ungueltiger Client.', 'ahx-wp-sso'), '', array('response' => 400));
+        }
+
+        $display_name = isset($_POST['display_name'])
+            ? sanitize_text_field(wp_unslash($_POST['display_name']))
+            : '';
+        $logo_url = isset($_POST['logo_url']) ? esc_url_raw(trim(wp_unslash($_POST['logo_url']))) : '';
+        $accent_color = isset($_POST['accent_color']) ? sanitize_hex_color(wp_unslash($_POST['accent_color'])) : '';
+        if ('' !== $logo_url && 'https' !== strtolower((string) wp_parse_url($logo_url, PHP_URL_SCHEME))) {
+            wp_die(esc_html__('Die Logo-URL muss HTTPS verwenden.', 'ahx-wp-sso'), '', array('response' => 400));
+        }
+        if (!$accent_color) {
+            $accent_color = '#2271b1';
+        }
+
+        $branding = get_option('ahx_wp_sso_client_branding', array());
+        if (!is_array($branding)) {
+            $branding = array();
+        }
+        $branding[$client_id] = array(
+            'display_name' => $display_name,
+            'logo_url' => $logo_url,
+            'accent_color' => $accent_color,
+        );
+        update_option('ahx_wp_sso_client_branding', $branding, false);
+        wp_safe_redirect(add_query_arg('branding_saved', '1', admin_url('options-general.php?page=ahx-wp-sso')));
+        exit;
+    }
+
+    private function get_client_branding($client_id) {
+        $all_branding = get_option('ahx_wp_sso_client_branding', array());
+        $branding = is_array($all_branding) && isset($all_branding[$client_id]) && is_array($all_branding[$client_id])
+            ? $all_branding[$client_id]
+            : array();
+        $logo_url = isset($branding['logo_url']) ? esc_url_raw($branding['logo_url']) : '';
+        if ('' !== $logo_url && 'https' !== strtolower((string) wp_parse_url($logo_url, PHP_URL_SCHEME))) {
+            $logo_url = '';
+        }
+        $accent_color = isset($branding['accent_color']) ? sanitize_hex_color($branding['accent_color']) : '';
+
+        return array(
+            'display_name' => isset($branding['display_name']) ? sanitize_text_field($branding['display_name']) : '',
+            'logo_url' => $logo_url,
+            'accent_color' => $accent_color ? $accent_color : '#2271b1',
+        );
     }
 
     private function render_clients() {
@@ -560,13 +627,25 @@ final class AHX_WP_SSO {
             return;
         }
         echo '<h3>' . esc_html__('Registrierte Clients', 'ahx-wp-sso') . '</h3>';
+        if (isset($_GET['branding_saved']) && '1' === sanitize_text_field(wp_unslash($_GET['branding_saved']))) {
+            echo '<div class="notice notice-success inline"><p>' . esc_html__('Client-Darstellung gespeichert.', 'ahx-wp-sso') . '</p></div>';
+        }
         if (!$rows) {
             echo '<p>' . esc_html__('Noch keine Clients registriert.', 'ahx-wp-sso') . '</p>';
             return;
         }
-        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Bezeichnung', 'ahx-wp-sso') . '</th><th>Client-ID</th><th>Callback-URL</th><th>' . esc_html__('Aktionen', 'ahx-wp-sso') . '</th></tr></thead><tbody>';
+        echo '<p>' . esc_html__('Logo, Anzeigename und Akzentfarbe werden auf der Host-Anmeldeseite für den jeweiligen Client verwendet. Auch bei einer bestehenden Host-Anmeldung erscheint eine Bestätigung mit Client-Darstellung.', 'ahx-wp-sso') . '</p>';
+        echo '<table class="widefat striped"><thead><tr><th>' . esc_html__('Bezeichnung', 'ahx-wp-sso') . '</th><th>Client-ID</th><th>Callback-URL</th><th>' . esc_html__('Anmeldedarstellung', 'ahx-wp-sso') . '</th><th>' . esc_html__('Aktionen', 'ahx-wp-sso') . '</th></tr></thead><tbody>';
         foreach ($rows as $row) {
-            echo '<tr><td>' . esc_html($row->client_name) . '</td><td><code>' . esc_html($row->client_id) . '</code></td><td><code>' . esc_html($row->redirect_uri) . '</code></td><td><form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="ahx_wp_sso_remove_client"><input type="hidden" name="client_id" value="' . esc_attr($row->client_id) . '">';
+            $branding = $this->get_client_branding($row->client_id);
+            echo '<tr><td>' . esc_html($row->client_name) . '</td><td><code>' . esc_html($row->client_id) . '</code></td><td><code>' . esc_html($row->redirect_uri) . '</code></td><td>';
+            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="ahx_wp_sso_save_client_branding"><input type="hidden" name="client_id" value="' . esc_attr($row->client_id) . '">';
+            wp_nonce_field('ahx_wp_sso_save_client_branding_' . $row->client_id);
+            echo '<p><label>' . esc_html__('Anzeigename', 'ahx-wp-sso') . '<br><input class="regular-text" type="text" name="display_name" value="' . esc_attr($branding['display_name']) . '" placeholder="' . esc_attr($row->client_name) . '"></label></p>';
+            echo '<p><label>' . esc_html__('Logo-URL (HTTPS)', 'ahx-wp-sso') . '<br><input class="regular-text" type="url" name="logo_url" value="' . esc_attr($branding['logo_url']) . '" placeholder="https://example.com/logo.png"></label></p>';
+            echo '<p><label>' . esc_html__('Akzentfarbe', 'ahx-wp-sso') . ' <input type="color" name="accent_color" value="' . esc_attr($branding['accent_color']) . '"></label></p>';
+            submit_button(__('Darstellung speichern', 'ahx-wp-sso'), 'secondary', 'submit', false);
+            echo '</form></td><td><form method="post" action="' . esc_url(admin_url('admin-post.php')) . '"><input type="hidden" name="action" value="ahx_wp_sso_remove_client"><input type="hidden" name="client_id" value="' . esc_attr($row->client_id) . '">';
             wp_nonce_field('ahx_wp_sso_remove_client_' . $row->client_id);
             submit_button(__('Client widerrufen', 'ahx-wp-sso'), 'delete', 'submit', false, array('onclick' => "return confirm('" . esc_js(__('Client wirklich widerrufen?', 'ahx-wp-sso')) . "');"));
             echo '</form></td></tr>';
@@ -718,6 +797,13 @@ final class AHX_WP_SSO {
             exit;
         }
 
+        $continue = isset($_GET['ahx_sso_continue'])
+            ? sanitize_text_field(wp_unslash($_GET['ahx_sso_continue']))
+            : '';
+        if ('1' !== $continue) {
+            $this->render_client_continue_dialog($client, $state, $challenge);
+        }
+
         $user = wp_get_current_user();
         if (!$user->exists() || !is_email($user->user_email)) {
             $this->deny(__('Das SSO-Konto hat keine gueltige E-Mail-Adresse.', 'ahx-wp-sso'), 403);
@@ -769,6 +855,58 @@ final class AHX_WP_SSO {
             $this->deny(__('Die Anmeldung konnte nicht vorbereitet werden. Bitte erneut versuchen.', 'ahx-wp-sso'), 500);
         }
         wp_redirect(add_query_arg(array('code' => $code, 'state' => $state), $redirect), 302, 'AHX WP SSO');
+        exit;
+    }
+
+    private function render_client_continue_dialog($client, $state, $challenge) {
+        $branding = $this->get_client_branding($client->client_id);
+        $display_name = '' !== $branding['display_name']
+            ? $branding['display_name']
+            : $client->client_name;
+        $user = wp_get_current_user();
+        $authorize_url = add_query_arg(array(
+            self::ACTION => 'authorize',
+            'client_id' => $client->client_id,
+            'redirect_uri' => $client->redirect_uri,
+            'state' => $state,
+            'code_challenge' => $challenge,
+        ), set_url_scheme(site_url('wp-login.php', 'login'), 'https'));
+        $continue_url = add_query_arg('ahx_sso_continue', '1', $authorize_url);
+        $logout_url = wp_logout_url($authorize_url);
+
+        nocache_headers();
+        status_header(200);
+        ?><!doctype html>
+        <html <?php language_attributes(); ?>>
+        <head>
+            <meta charset="<?php bloginfo('charset'); ?>">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title><?php echo esc_html(sprintf(__('Weiter zu %s', 'ahx-wp-sso'), $display_name)); ?></title>
+            <style>
+                :root { color-scheme: light; }
+                body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; box-sizing: border-box; background: #f0f2f5; color: #1d2327; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+                .ahx-sso-card { width: min(100%, 420px); box-sizing: border-box; padding: 32px; border-radius: 12px; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.12); text-align: center; }
+                .ahx-sso-logo { display: block; max-width: 220px; max-height: 80px; width: auto; height: auto; margin: 0 auto 20px; }
+                .ahx-sso-card h1 { margin: 0 0 8px; font-size: 24px; line-height: 1.25; }
+                .ahx-sso-card p { margin: 8px 0 20px; color: #50575e; overflow-wrap: anywhere; }
+                .ahx-sso-button { display: block; width: 100%; box-sizing: border-box; padding: 11px 16px; border: 0; border-radius: 6px; background: <?php echo esc_html($branding['accent_color']); ?>; color: #fff; font-size: 16px; font-weight: 600; text-decoration: none; cursor: pointer; }
+                .ahx-sso-button:hover, .ahx-sso-button:focus { filter: brightness(.92); color: #fff; }
+                .ahx-sso-switch { display: inline-block; margin-top: 16px; color: <?php echo esc_html($branding['accent_color']); ?>; }
+            </style>
+        </head>
+        <body>
+            <main class="ahx-sso-card">
+                <?php if ('' !== $branding['logo_url']) : ?>
+                    <img class="ahx-sso-logo" src="<?php echo esc_url($branding['logo_url']); ?>" alt="<?php echo esc_attr($display_name); ?>">
+                <?php endif; ?>
+                <h1><?php echo esc_html(sprintf(__('Weiter zu %s', 'ahx-wp-sso'), $display_name)); ?></h1>
+                <p><?php echo esc_html(sprintf(__('Angemeldet als %s', 'ahx-wp-sso'), $user->user_login)); ?></p>
+                <p><?php esc_html_e('Mit deiner bestehenden Anmeldung kannst du sicher fortfahren.', 'ahx-wp-sso'); ?></p>
+                <a class="ahx-sso-button" href="<?php echo esc_url($continue_url); ?>"><?php esc_html_e('Weiter', 'ahx-wp-sso'); ?></a>
+                <a class="ahx-sso-switch" href="<?php echo esc_url($logout_url); ?>"><?php esc_html_e('Mit einem anderen Konto anmelden', 'ahx-wp-sso'); ?></a>
+            </main>
+        </body>
+        </html><?php
         exit;
     }
 
@@ -1119,6 +1257,118 @@ final class AHX_WP_SSO {
             $message .= '<p class="message">' . esc_html__('Der SSO-Host ist nicht erreichbar. Nur zuvor freigegebene lokale Notfallkonten koennen sich anmelden.', 'ahx-wp-sso') . '</p>';
         }
         return $message;
+    }
+
+    public function client_login_message($message) {
+        $context = $this->get_client_login_context();
+        if (!$context) {
+            return $message;
+        }
+
+        $branding = $this->get_client_branding($context['client']->client_id);
+        $display_name = '' !== $branding['display_name']
+            ? $branding['display_name']
+            : $context['client']->client_name;
+        return '<p class="message ahx-sso-client-message">' . esc_html(sprintf(
+            __('Melde dich mit deinem zentralen Konto an, um zu %s zu gelangen.', 'ahx-wp-sso'),
+            $display_name
+        )) . '</p>' . $message;
+    }
+
+    public function client_login_title($login_title, $title = '', $action = '') {
+        $context = $this->get_client_login_context();
+        if (!$context) {
+            return $login_title;
+        }
+        $branding = $this->get_client_branding($context['client']->client_id);
+        $display_name = '' !== $branding['display_name'] ? $branding['display_name'] : $context['client']->client_name;
+        return sprintf(__('Anmelden bei %s', 'ahx-wp-sso'), $display_name);
+    }
+
+    public function client_login_header_url($url) {
+        $context = $this->get_client_login_context();
+        if (!$context) {
+            return $url;
+        }
+        $parts = wp_parse_url($context['client']->redirect_uri);
+        if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
+            return $url;
+        }
+        $port = isset($parts['port']) ? ':' . absint($parts['port']) : '';
+        return strtolower($parts['scheme']) . '://' . $parts['host'] . $port . '/';
+    }
+
+    public function client_login_header_text($text) {
+        $context = $this->get_client_login_context();
+        if (!$context) {
+            return $text;
+        }
+        $branding = $this->get_client_branding($context['client']->client_id);
+        return '' !== $branding['display_name'] ? $branding['display_name'] : $context['client']->client_name;
+    }
+
+    public function client_login_styles() {
+        $context = $this->get_client_login_context();
+        if (!$context) {
+            return;
+        }
+
+        $branding = $this->get_client_branding($context['client']->client_id);
+        ?>
+        <style>
+            body.login { --ahx-sso-accent: <?php echo esc_html($branding['accent_color']); ?>; }
+            body.login h1 a {
+                <?php if ('' !== $branding['logo_url']) : ?>
+                    background-image: url(<?php echo wp_json_encode(esc_url($branding['logo_url'])); ?>);
+                    background-size: contain;
+                    width: 100%;
+                <?php endif; ?>
+            }
+            body.login #login { width: min(360px, calc(100% - 32px)); }
+            body.login .button-primary { background: var(--ahx-sso-accent); border-color: var(--ahx-sso-accent); }
+            body.login .button-primary:hover, body.login .button-primary:focus { filter: brightness(.92); background: var(--ahx-sso-accent); border-color: var(--ahx-sso-accent); }
+            body.login input:focus { border-color: var(--ahx-sso-accent); box-shadow: 0 0 0 1px var(--ahx-sso-accent); }
+            body.login .ahx-sso-client-message { border-left-color: var(--ahx-sso-accent); }
+        </style>
+        <?php
+    }
+
+    private function get_client_login_context() {
+        if ('host' !== $this->config()['mode']) {
+            return false;
+        }
+
+        $params = wp_unslash($_GET);
+        if (
+            isset($params['redirect_to'])
+            && is_string($params['redirect_to'])
+            && false !== strpos($params['redirect_to'], 'ahx_wp_sso=authorize')
+        ) {
+            $redirect_parts = wp_parse_url($params['redirect_to']);
+            if (is_array($redirect_parts) && isset($redirect_parts['query'])) {
+                parse_str($redirect_parts['query'], $redirect_params);
+                $params = $redirect_params;
+            }
+        }
+
+        if (!isset($params[self::ACTION]) || 'authorize' !== sanitize_key((string) $params[self::ACTION])) {
+            return false;
+        }
+        $client_id = isset($params['client_id']) ? sanitize_text_field((string) $params['client_id']) : '';
+        $redirect = isset($params['redirect_uri']) ? esc_url_raw((string) $params['redirect_uri']) : '';
+        $state = isset($params['state']) ? sanitize_text_field((string) $params['state']) : '';
+        $challenge = isset($params['code_challenge']) ? sanitize_text_field((string) $params['code_challenge']) : '';
+        $client = $this->get_client($client_id);
+        if (
+            !$client
+            || !$this->same_url($client->redirect_uri, $redirect)
+            || !preg_match('/^[a-f0-9]{64}$/', $state)
+            || !preg_match('/^[A-Za-z0-9_-]{43}$/', $challenge)
+        ) {
+            return false;
+        }
+
+        return array('client' => $client);
     }
 
     public function validate_client_session() {
