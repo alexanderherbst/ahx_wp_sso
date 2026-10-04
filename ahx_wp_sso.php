@@ -2,7 +2,7 @@
 /*
 Plugin Name: AHX WP SSO
 Description: Zentraler Anmeldehost fuer WordPress-Einzelinstallationen und Multisite.
-Version: v0.1.1
+Version: v0.1.2
 Requires PHP: 7.3
 Author: AHX
 */
@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('AHX_WP_SSO_VERSION', 'v0.1.1');
+define('AHX_WP_SSO_VERSION', 'v0.1.2');
 define('AHX_WP_SSO_FILE', __FILE__);
 define('AHX_WP_SSO_DIR', plugin_dir_path(__FILE__));
 

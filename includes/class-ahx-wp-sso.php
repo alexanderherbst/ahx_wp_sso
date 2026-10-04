@@ -49,6 +49,7 @@ final class AHX_WP_SSO {
             code_hash char(64) NOT NULL,
             client_id char(64) NOT NULL,
             user_id bigint(20) unsigned NOT NULL,
+            host_session_id char(64) NOT NULL DEFAULT '',
             code_challenge char(64) NOT NULL,
             expires_at datetime NOT NULL,
             used_at datetime NULL DEFAULT NULL,
@@ -745,6 +746,11 @@ final class AHX_WP_SSO {
             exit;
         }
 
+        $host_session_id = $this->ensure_host_session($user->ID);
+        if (!$host_session_id) {
+            $this->deny(__('Die zentrale Sitzung konnte nicht gespeichert werden.', 'ahx-wp-sso'), 500);
+        }
+
         $code = bin2hex(random_bytes(32));
         $inserted = $wpdb->insert(
             $this->table('codes'),
@@ -752,10 +758,11 @@ final class AHX_WP_SSO {
                 'code_hash' => hash('sha256', $code),
                 'client_id' => $client_id,
                 'user_id' => $user->ID,
+                'host_session_id' => $host_session_id,
                 'code_challenge' => $challenge,
                 'expires_at' => gmdate('Y-m-d H:i:s', time() + self::FLOW_LIFETIME),
             ),
-            array('%s', '%s', '%d', '%s', '%s')
+            array('%s', '%s', '%d', '%s', '%s', '%s')
         );
         if (false === $inserted) {
             error_log('AHX WP SSO could not store an authorization code: ' . $wpdb->last_error);
@@ -783,7 +790,7 @@ final class AHX_WP_SSO {
         global $wpdb;
         $codes = $this->table('codes');
         $row = $wpdb->get_row($wpdb->prepare(
-            "SELECT user_id, code_challenge FROM $codes WHERE code_hash = %s AND client_id = %s AND expires_at > %s AND used_at IS NULL",
+            "SELECT user_id, host_session_id, code_challenge FROM $codes WHERE code_hash = %s AND client_id = %s AND expires_at > %s AND used_at IS NULL",
             hash('sha256', $code),
             $client->client_id,
             gmdate('Y-m-d H:i:s')
@@ -812,9 +819,25 @@ final class AHX_WP_SSO {
         if (!$user || !is_email($user->user_email)) {
             return new WP_Error('ahx_sso_invalid_user', __('SSO-Benutzer nicht verfuegbar.', 'ahx-wp-sso'), array('status' => 403));
         }
-        $session_id = $this->ensure_host_session($user->ID);
-        if (!$session_id) {
+        $session_id = isset($row->host_session_id) ? (string) $row->host_session_id : '';
+        if (!preg_match('/^[a-f0-9]{64}$/', $session_id)) {
             return new WP_Error('ahx_sso_storage_error', __('SSO-Sitzung konnte nicht gespeichert werden.', 'ahx-wp-sso'), array('status' => 500));
+        }
+        $host_session = $wpdb->get_row($wpdb->prepare(
+            "SELECT user_id, active, host_token_hash FROM " . $this->table('host_sessions') . " WHERE session_id = %s",
+            $session_id
+        ));
+        if (!empty($wpdb->last_error)) {
+            error_log('AHX WP SSO could not validate the host session for an authorization code: ' . $wpdb->last_error);
+            return new WP_Error('ahx_sso_storage_error', __('SSO-Sitzung konnte nicht geprueft werden.', 'ahx-wp-sso'), array('status' => 500));
+        }
+        if (
+            !$host_session
+            || absint($host_session->user_id) !== absint($user->ID)
+            || 1 !== (int) $host_session->active
+            || !$this->host_session_is_valid(absint($host_session->user_id), $host_session->host_token_hash)
+        ) {
+            return new WP_Error('ahx_sso_invalid_grant', __('Die zentrale Anmeldung ist nicht mehr aktiv. Bitte erneut anmelden.', 'ahx-wp-sso'), array('status' => 400));
         }
         $client_session_id = bin2hex(random_bytes(32));
         $created_at = gmdate('Y-m-d H:i:s');
