@@ -1026,9 +1026,23 @@ final class AHX_WP_SSO {
             error_log('AHX WP SSO token request failed: ' . $response->get_error_message());
             $this->deny(__('Der SSO-Host ist momentan nicht erreichbar.', 'ahx-wp-sso'), 503);
         }
-        $body = json_decode(wp_remote_retrieve_body($response), true);
-        if (200 !== wp_remote_retrieve_response_code($response) || !is_array($body)
+        $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+        $body = json_decode($response_body, true);
+        if (200 !== $response_code || !is_array($body)
             || empty($body['email']) || empty($body['session_id']) || empty($body['client_session_id'])) {
+            $host_error_code = is_array($body) && isset($body['code'])
+                ? sanitize_key((string) $body['code'])
+                : 'invalid_response';
+            $host_error_message = is_array($body) && isset($body['message'])
+                ? sanitize_text_field((string) $body['message'])
+                : 'Keine gueltige JSON-Antwort vom SSO-Host.';
+            error_log(sprintf(
+                'AHX WP SSO host rejected token exchange: HTTP %d, code=%s, message=%s',
+                (int) $response_code,
+                $host_error_code,
+                $host_error_message
+            ));
             $this->deny(__('Der SSO-Host hat die Anmeldung abgelehnt.', 'ahx-wp-sso'), 403);
         }
         $email = strtolower(trim(sanitize_email($body['email'])));
