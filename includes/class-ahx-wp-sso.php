@@ -360,7 +360,7 @@ final class AHX_WP_SSO {
                 : array();
             $config['break_glass_user_ids'] = array_values(array_unique(array_filter($break_glass_ids, function($user_id) {
                 $user = get_userdata($user_id);
-                return $user && (is_super_admin($user_id) || is_user_member_of_blog($user_id, get_current_blog_id()));
+                return $user instanceof WP_User;
             })));
         }
         return $config;
@@ -1708,10 +1708,11 @@ final class AHX_WP_SSO {
 
     private function host_rest_url($route) {
         $config = $this->config();
+        $host_url = 'host' === $config['mode'] ? home_url('/') : $config['host_url'];
         return add_query_arg(
             'rest_route',
             '/' . self::REST_NAMESPACE . '/' . sanitize_key($route),
-            trailingslashit($config['host_url'])
+            trailingslashit($host_url)
         );
     }
 
