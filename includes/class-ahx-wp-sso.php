@@ -142,7 +142,7 @@ final class AHX_WP_SSO {
         }
         add_menu_page(
             __('AHX WP SSO Dashboard', 'ahx-wp-sso'),
-            __('Dashboard', 'ahx-wp-sso'),
+            __('AHX SSO Dashboard', 'ahx-wp-sso'),
             'manage_options',
             'ahx-wp-sso-dashboard',
             array($this, 'render_dashboard'),
