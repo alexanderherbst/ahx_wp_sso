@@ -1678,7 +1678,7 @@ final class AHX_WP_SSO {
             return false;
         }
         global $wpdb;
-        $client = $wpdb->get_row($wpdb->prepare("SELECT client_id, secret_hash, redirect_uri FROM " . $this->table('clients') . " WHERE client_id = %s", $client_id));
+        $client = $wpdb->get_row($wpdb->prepare("SELECT client_id, secret_hash, client_name, redirect_uri FROM " . $this->table('clients') . " WHERE client_id = %s", $client_id));
         if (!empty($wpdb->last_error)) {
             error_log('AHX WP SSO could not look up client: ' . $wpdb->last_error);
             return false;
