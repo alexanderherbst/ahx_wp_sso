@@ -115,8 +115,10 @@ final class AHX_WP_SSO {
         add_filter('login_message', array($this, 'client_login_message'), 20);
         add_filter('login_title', array($this, 'client_login_title'), 10, 3);
         add_filter('login_headerurl', array($this, 'client_login_header_url'));
-        add_filter('login_headertext', array($this, 'client_login_header_text'));
+        add_filter('login_headertext', array($this, 'client_login_header_text'), 100);
+        add_filter('login_site_html_link', array($this, 'host_login_cancel_link'), 100);
         add_action('login_head', array($this, 'client_login_styles'));
+        add_action('login_footer', array($this, 'host_login_actions'));
     }
 
     public function maybe_upgrade() {
@@ -1262,6 +1264,15 @@ final class AHX_WP_SSO {
     public function client_login_message($message) {
         $context = $this->get_client_login_context();
         if (!$context) {
+            if ('host' === $this->config()['mode']) {
+                return '<div class="ahx-sso-host-intro"><h2>' . esc_html__(
+                    'Zentrale Anmeldung',
+                    'ahx-wp-sso'
+                ) . '</h2><p>' . esc_html__(
+                    'Dein Konto für alle verbundenen Sites.',
+                    'ahx-wp-sso'
+                ) . '</p></div>' . $message;
+            }
             return $message;
         }
 
@@ -1278,6 +1289,9 @@ final class AHX_WP_SSO {
     public function client_login_title($login_title, $title = '', $action = '') {
         $context = $this->get_client_login_context();
         if (!$context) {
+            if ('host' === $this->config()['mode']) {
+                return __('Zentrale Anmeldung | AHX SSO', 'ahx-wp-sso');
+            }
             return $login_title;
         }
         $branding = $this->get_client_branding($context['client']->client_id);
@@ -1288,6 +1302,9 @@ final class AHX_WP_SSO {
     public function client_login_header_url($url) {
         $context = $this->get_client_login_context();
         if (!$context) {
+            if ('host' === $this->config()['mode']) {
+                return home_url('/');
+            }
             return $url;
         }
         $parts = wp_parse_url($context['client']->redirect_uri);
@@ -1301,15 +1318,212 @@ final class AHX_WP_SSO {
     public function client_login_header_text($text) {
         $context = $this->get_client_login_context();
         if (!$context) {
+            if ('host' === $this->config()['mode']) {
+                return 'AHX SSO';
+            }
             return $text;
         }
         $branding = $this->get_client_branding($context['client']->client_id);
         return '' !== $branding['display_name'] ? $branding['display_name'] : $context['client']->client_name;
     }
 
+    public function host_login_cancel_link($link) {
+        if ('host' !== $this->config()['mode'] || $this->get_client_login_context()) {
+            return $link;
+        }
+        return preg_replace_callback('/(<a\b[^>]*>).*?(<\/a>)/is', function($matches) {
+            return $matches[1] . esc_html__('Abbrechen', 'ahx-wp-sso') . $matches[2];
+        }, $link, 1);
+    }
+
+    public function host_login_actions() {
+        if ('host' !== $this->config()['mode'] || $this->get_client_login_context()) {
+            return;
+        }
+        ?>
+        <script>
+            (function() {
+                var submit = document.querySelector('#loginform .submit');
+                var footer = document.getElementById('backtoblog');
+                var cancel = footer ? footer.querySelector('a') : null;
+                if (!submit || !cancel) {
+                    return;
+                }
+                cancel.classList.add('ahx-sso-cancel');
+                submit.classList.add('ahx-sso-actions');
+                submit.insertBefore(cancel, submit.firstChild);
+                footer.remove();
+            }());
+        </script>
+        <?php
+    }
+
     public function client_login_styles() {
         $context = $this->get_client_login_context();
         if (!$context) {
+            if ('host' !== $this->config()['mode']) {
+                return;
+            }
+            ?>
+            <style>
+                body.login {
+                    --ahx-sso-accent: #087b9a;
+                    background: radial-gradient(ellipse at top, #e5f2f5, #f5f7fa 65%);
+                    color: #253546;
+                    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                }
+                body.login #login {
+                    box-sizing: border-box;
+                    width: min(420px, calc(100% - 32px));
+                    margin: 7vh auto 0;
+                    padding: 32px;
+                    border: 1px solid #e1e8ee;
+                    border-radius: 20px;
+                    background: #fff;
+                    box-shadow: 0 16px 48px rgba(32, 57, 76, .08);
+                }
+                body.login #login h1 a {
+                    width: auto;
+                    height: auto;
+                    margin: 0 0 24px;
+                    padding: 0;
+                    background: none;
+                    color: var(--ahx-sso-accent);
+                    font-size: 20px;
+                    font-weight: 700;
+                    line-height: 1.3;
+                    text-indent: 0;
+                    text-decoration: none;
+                    letter-spacing: .06em;
+                }
+                body.login #login h1 a::after { content: none; }
+                body.login .ahx-sso-host-intro { margin: 0 0 24px; text-align: center; }
+                body.login .ahx-sso-host-intro h2 {
+                    margin: 0 0 6px;
+                    color: #182b3a;
+                    font-size: 24px;
+                    font-weight: 650;
+                    line-height: 1.3;
+                }
+                body.login .ahx-sso-host-intro p { margin: 0; color: #647587; }
+                body.login #login form {
+                    margin-top: 20px;
+                    padding: 0;
+                    border: 0;
+                    background: transparent;
+                    box-shadow: none;
+                }
+                body.login #login form label { font-size: 14px; }
+                body.login #login form .input {
+                    box-sizing: border-box;
+                    min-height: 46px;
+                    margin: 6px 0 18px;
+                    padding: 10px 12px;
+                    border: 1px solid #b9c7d3;
+                    border-radius: 8px;
+                    background: #f9fbfd;
+                    color: #182b3a;
+                    font-size: 16px;
+                    line-height: 1.5;
+                }
+                body.login #login form .wp-pwd .input { padding-right: 44px; }
+                body.login #login form .wp-hide-pw { top: 7px; height: 44px; color: var(--ahx-sso-accent); }
+                body.login #login form .forgetmenot { float: none; margin: 0 0 20px; }
+                body.login #login form .forgetmenot label { font-size: 13px; }
+                body.login #login form .submit { margin: 0; }
+                body.login #login form .submit.ahx-sso-actions {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                    gap: 12px;
+                }
+                body.login #login form .submit .button-primary {
+                    float: none;
+                    width: 100%;
+                    min-height: 46px;
+                    margin: 0;
+                    border-radius: 8px;
+                    font-size: 15px;
+                    font-weight: 600;
+                }
+                body.login .button-primary { background: var(--ahx-sso-accent); border-color: var(--ahx-sso-accent); box-shadow: none; }
+                body.login .button-primary:hover, body.login .button-primary:focus { background: #06647e; border-color: #06647e; }
+                body.login input:focus, body.login select:focus { border-color: var(--ahx-sso-accent); box-shadow: 0 0 0 2px rgba(8, 123, 154, .2); }
+                body.login .message, body.login #login_error, body.login .notice { border-radius: 6px; }
+                body.login #nav, body.login #backtoblog { margin: 18px 0 0; padding: 0; text-align: center; font-size: 13px; }
+                body.login #nav a, body.login #backtoblog a { color: #526779; }
+                body.login #nav a:hover, body.login #backtoblog a:hover { color: var(--ahx-sso-accent); }
+                body.login #backtoblog a, body.login #login .ahx-sso-cancel {
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    box-sizing: border-box;
+                    min-height: 46px;
+                    padding: 10px 16px;
+                    border: 1px solid #d5dfe7;
+                    border-radius: 8px;
+                    background: #f9fbfd;
+                    color: #526779;
+                    font-size: 14px;
+                    font-weight: 600;
+                    text-decoration: none;
+                }
+                body.login #backtoblog a:hover, body.login #login .ahx-sso-cancel:hover { border-color: #b9c7d3; background: #eef4f7; }
+                body.login #backtoblog a:focus-visible, body.login #login .ahx-sso-cancel:focus-visible { outline: 2px solid var(--ahx-sso-accent); outline-offset: 3px; }
+                body.login .language-switcher {
+                    box-sizing: border-box;
+                    width: min(420px, calc(100% - 32px));
+                    margin: 16px auto 24px;
+                    padding: 16px 20px;
+                    border: 1px solid #e1e8ee;
+                    border-radius: 12px;
+                    background: rgba(255, 255, 255, .8);
+                }
+                body.login .language-switcher form {
+                    display: grid;
+                    grid-template-columns: minmax(0, 1fr) auto;
+                    align-items: center;
+                    gap: 8px 10px;
+                    margin: 0;
+                    padding: 0;
+                    border: 0;
+                    background: transparent;
+                    box-shadow: none;
+                }
+                body.login .language-switcher label { grid-column: 1 / -1; margin: 0; color: #526779; text-align: left; font-size: 12px; font-weight: 600; }
+                body.login .language-switcher label .dashicons { display: none; }
+                body.login .language-switcher select {
+                    box-sizing: border-box;
+                    width: 100%;
+                    min-width: 0;
+                    max-width: 100%;
+                    min-height: 40px;
+                    margin: 0;
+                    padding-left: 10px;
+                    border: 1px solid #b9c7d3;
+                    border-radius: 8px;
+                    background-color: #fff;
+                    color: #253546;
+                    font-size: 14px;
+                }
+                body.login .language-switcher .button {
+                    min-height: 40px;
+                    margin: 0;
+                    padding: 0 14px;
+                    border: 1px solid #d5dfe7;
+                    border-radius: 8px;
+                    background: #eef4f7;
+                    color: #36566a;
+                    font-size: 13px;
+                    font-weight: 600;
+                    box-shadow: none;
+                }
+                body.login .language-switcher .button:hover { border-color: #b9c7d3; background: #e3edf2; }
+                body.login .language-switcher .button:focus-visible { outline: 2px solid var(--ahx-sso-accent); outline-offset: 3px; }
+                @media (max-width: 480px) {
+                    body.login #login { margin-top: 24px; padding: 26px 24px; }
+                }
+            </style>
+            <?php
             return;
         }
 

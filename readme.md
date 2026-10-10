@@ -19,6 +19,10 @@ AHX WP SSO betreibt einen eigenständigen WordPress-SSO-Host für WordPress-Clie
 3. Für jede Client-Site eine Registrierung anlegen. Die Callback-URL wird in Schritt 2 auf der Client-Site angezeigt. Sie muss vollständig und exakt mit HTTPS eingetragen werden.
 4. Das nach dem Anlegen einmalig angezeigte Client-Secret sicher aufbewahren. Es wird nicht im Klartext in der Datenbank gespeichert und kann später nicht erneut angezeigt werden.
 
+Der direkte Aufruf der Host-Anmeldeseite verwendet eine kompakte, responsive AHX-SSO-Anmeldekarte statt des WordPress- oder Theme-Logos. Anmeldung, Fehlerhinweise, Sprachwahl und Passwortwiederherstellung bleiben dabei die WordPress-Funktionen des Hosts. Bei einer SSO-Anfrage wird die Host-Anmeldeseite weiterhin mit der Darstellung des jeweiligen Clients gestaltet.
+
+Der Button **Abbrechen** führt zum bisherigen Ziel des Rücklinks und steht bei der Anmeldung links neben **Anmelden**. Ohne JavaScript bleibt er unter dem Formular erreichbar. Die Sprachwahl erscheint in einem passenden kompakten Bereich unter der Anmeldekarte und wird über **Wechseln** bestätigt.
+
 Registrierte Clients können in der Liste widerrufen werden. Nach dem Widerruf sind keine neuen Anmeldungen dieses Clients mehr möglich.
 
 In der Client-Liste kann die Anmeldedarstellung pro Client angepasst werden: Anzeigename, HTTPS-Logo-URL und Akzentfarbe. Bei einem Anmeldeversuch wird die Host-Anmeldeseite passend zum Client gestaltet. Ist am Host bereits ein Benutzer angemeldet, erscheint stattdessen eine gestaltete Bestätigung mit „Weiter“ und einer Option, das Konto zu wechseln. Das Passwort wird weiterhin ausschließlich auf der SSO-Host-Seite eingegeben.
